@@ -152,6 +152,7 @@ void EpicChallenge::on_challengeButton()
     // Print UID
     for(byte i = 0; i < mfrc.uid.size; ++i)
         UID[i]=mfrc.uid.uidByte[i];
+    //qDebug() << QString::number(UID[0],16)<<QString::number(UID[1],16)<<QString::number(UID[2],16);
 #endif
 
     //identification du tag
@@ -161,8 +162,24 @@ void EpicChallenge::on_challengeButton()
 
     if(debug_tag!=0)
         getChallenge(debug_tag,m_sportMode);
-    else if(new_tag_id!=0x00)
-        getChallenge(new_tag_id,m_sportMode);
+    else {
+        QSqlQuery query1;
+        QString query1_str="SELECT tag FROM tagID WHERE (id1=%1 AND id2=%2 AND id3=%3)";
+
+        if(!query1.exec(query1_str.arg(UID[0]).arg(UID[1]).arg(UID[2])))
+          qDebug() << "ERROR: " << query1.lastError().text();
+        else {
+            int query_tag=0;
+            while (query1.next()) {
+                    query_tag = query1.value(0).toInt();
+                    qDebug() << query_tag;
+                }
+            if(query_tag!=0)
+            getChallenge(query_tag,m_sportMode);
+        }
+    }
+    /*else if(new_tag_id!=0x00)
+        getChallenge(new_tag_id,m_sportMode);*/
 }
 
 unsigned char EpicChallenge::loadChallenges(QString filePath)
@@ -250,11 +267,26 @@ unsigned char EpicChallenge::setDataBase()
             {
                 QString line = file.readLine();
                 QStringList list1 = line.split(QLatin1Char(';'));
-                if(list1.size()>=2)
+                if(list1.size()>=4)
                 {
-                    QString str_num=list1.at(0);
-                    QString str_name=list1.at(1);
-                    qDebug() << str_num << " : "<<str_name;
+                    bool ok;
+                    QString str_uid1=list1.at(0);
+                    int uid1=str_uid1.toInt(&ok,16);
+                    QString str_uid2=list1.at(1);
+                    int uid2=str_uid2.toInt(&ok,16);
+                    QString str_uid3=list1.at(2);
+                    int uid3=str_uid3.toInt(&ok,16);
+                    QString str_name=list1.at(4);
+                    QString str_num=list1.at(3);
+                    int num=str_num.toInt();
+
+                    qDebug() << str_num << " : " <<str_name;
+                    //enregistrement du chrono
+                    QSqlQuery query1;
+                    QString query1_str="INSERT INTO tagID(id1,id2,id3,tag,name) VALUES(%1,%2,%3,%4,'%5')";
+
+                    if(!query1.exec(query1_str.arg(uid1).arg(uid2).arg(uid3).arg(num).arg(str_name)))
+                      qDebug() << "ERROR: " << query1.lastError().text();
                 }
             }
             file.close();

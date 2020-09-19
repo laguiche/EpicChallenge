@@ -2,8 +2,8 @@
 #include <QApplication>
 
 #ifdef ON_PI
-    #include <wiringPi.h>
-    #include <wiringPiI2C.h>
+    //#include <wiringPi.h>
+    //#include <wiringPiI2C.h>
 #endif
 
 int main(int argc, char *argv[])

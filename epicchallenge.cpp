@@ -1,5 +1,6 @@
 #include "epicchallenge.h"
 #include "ui_epicchallenge.h"
+#include <QDebug>
 
 EpicChallenge::EpicChallenge(QWidget *parent) :
     QMainWindow(parent),
@@ -16,18 +17,58 @@ EpicChallenge::~EpicChallenge()
 
 void EpicChallenge::init()
 {
+    //if we are not in sport mode we turn on party mode which doesn't care high, medium or low challenge;
+    //furthermore we have stats and other stuff in sport mode
     m_sportMode=true;
 
-    setDataBase();
+    //init database to save time of running loops in sport mode
+    unsigned char m_statusDB=NOK;
+    if (m_sportMode)
+        m_statusDB=setDataBase();
 
-    loadChallenges();
+    QString m_filePath_highChallenge=_HIGH_CHALLENGE_PATH_;
+    unsigned char statusFile_1=loadChallenges(m_filePath_highChallenge);
 
+    QString m_filePath_mediumChallenge=_MEDIUM_CHALLENGE_PATH_;
+    unsigned char statusFile_2=loadChallenges(m_filePath_mediumChallenge);
+
+    QString m_filePath_lowChallenge=_LOW_CHALLENGE_PATH_;
+    unsigned char statusFile_3=loadChallenges(m_filePath_lowChallenge);
+
+#ifdef ON_PI
+    mfrc.PCD_Init();
+#endif
+
+    m_cadenceur=new QTimer();
     t_0=QTime::currentTime();
 
-    connect(ui->challengeButton,SIGNAL(clicked(bool)),this,SLOT(on_challengeButton()));
+    QPalette sample_palette;
+    sample_palette.setColor(QPalette::Window, QColor(121,248,248,255));
+    ui->challengeLabel->setAutoFillBackground(true);
+    ui->challengeLabel->setPalette(sample_palette);
+
+    QString error_msg;
+    if (statusFile_1*statusFile_2*statusFile_3==NOK)
+    {
+        error_msg="Problème avec le(s) fichier(s) de challenge (vide(s), absent(s), ...)!";
+        ui->challengeLabel->setText(error_msg);
+    }
+    else if ((m_statusDB==NOK)&&(m_sportMode))
+    {
+        error_msg=error_msg+"\nImpossible d'enregistrer les résultats (mémoire pleine, erreur d'écriture,...).";
+        ui->challengeLabel->setText(error_msg);
+    }
+    else
+    {
+        //connect(ui->challengeButton,SIGNAL(clicked(bool)),this,SLOT(on_challengeButton()));
+        connect(m_cadenceur,SIGNAL(timeout()),this,SLOT(on_challengeButton()));
+        //connect(ui->TagEdit,SIGNAL(textEdited(QString)),this,SLOT(on_challengeButton()));
+        connect(ui->TagEdit,SIGNAL(returnPressed()),this,SLOT(on_challengeButton()));
+        m_cadenceur->start(10);
+    }
 }
 
-void EpicChallenge::getChallenge(int id)
+void EpicChallenge::getChallenge(int id, bool mode)
 {
     QTime t_new=QTime::currentTime();
     QString tag;
@@ -54,7 +95,7 @@ void EpicChallenge::getChallenge(int id)
     timeElapsed=t_last.msecsTo(t_new);
     qDebug() << t_last << t_new << timeElapsed;
 
-    if((timeElapsed/1000)>=10.)
+    if(mode && ((timeElapsed/1000)>=10.))
     {
         //enregistrement du chrono
         QSqlQuery query1;
@@ -63,50 +104,106 @@ void EpicChallenge::getChallenge(int id)
         if(!query1.exec(query1_str.arg(id).arg(t_new.toString("hh_mm_ss"))))
           qDebug() << "ERROR: " << query1.lastError().text();
 
-        int idxChallenge=std::rand() % m_challenges.size();
+        int idxChallenge=std::rand() % m_highChallenges.size();
         QString msg;
         msg.setNum(id);
-        msg=msg+" : "+m_challenges.at(idxChallenge);
+        msg=msg+" : "+m_highChallenges.at(idxChallenge);
+        ui->challengeLabel->setText(msg);
+    }
+    if(!mode && ((timeElapsed/1000)>=2.))
+    {
+        //enregistrement du chrono
+        QSqlQuery query1;
+        QString query1_str="INSERT INTO loops(tag,chrono) VALUES(%1,'%2')";
+
+        if(!query1.exec(query1_str.arg(id).arg(t_new.toString("hh_mm_ss"))))
+          qDebug() << "ERROR: " << query1.lastError().text();
+
+        int idxChallenge=std::rand() % m_highChallenges.size();
+        QString msg=m_highChallenges.at(idxChallenge);
         ui->challengeLabel->setText(msg);
     }
 }
 
 void EpicChallenge::on_challengeButton()
 {
-    getChallenge(21);
+
+    unsigned char UID[3];
+
+    //for debug purpose (without raspberry pi for example)
+    QObject *obj=sender();
+    int debug_tag=0;
+    if(obj==ui->TagEdit)
+    {
+        QString m_string_uid= ui->TagEdit->text();
+        debug_tag=m_string_uid.toInt();
+        qDebug() << "[DEBUG] nouveau tag" << debug_tag;
+        ui->TagEdit->clear();
+    }
+
+#ifdef ON_PI
+    // Look for a card
+    if(!mfrc.PICC_IsNewCardPresent())
+    return;
+
+    if( !mfrc.PICC_ReadCardSerial())
+    return;
+
+    // Print UID
+    for(byte i = 0; i < mfrc.uid.size; ++i)
+        UID[i]=mfrc.uid.uidByte[i];
+#endif
+
+    //identification du tag
+    unsigned char new_tag_id=0x00;
+    if((UID[0]==m_01[0])&&(UID[1]==m_01[1])&&(UID[2]==m_01[2]))       new_tag_id=0x01;
+    else if((UID[0]==m_02[0])&&(UID[1]==m_02[1])&&(UID[2]==m_02[2]))  new_tag_id=0x02;
+
+    if(debug_tag!=0)
+        getChallenge(debug_tag,m_sportMode);
+    else if(new_tag_id!=0x00)
+        getChallenge(new_tag_id,m_sportMode);
 }
 
-void EpicChallenge::loadChallenges()
+unsigned char EpicChallenge::loadChallenges(QString filePath)
 {
-    QString msg("Problème avec le fichier de challenge (vide, absent, ...)!");
+    unsigned char status=OK;
 
-    QFile file("./challenges/highChallenge.txt");
+    QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
     {
-        m_challenges << msg;
-        ui->challengeLabel->setText(msg);
-        return;
+        status=NOK;
+    }
+    else
+    {
+        while (!file.atEnd())
+        {
+            QByteArray line = file.readLine();
+            if (!line.isEmpty())
+            {
+                m_highChallenges << QString(line);
+            }
+        }
+
+        file.close();
+
+        if (m_highChallenges.isEmpty())
+        {
+            status=NOK;
+        }
     }
 
-    while (!file.atEnd())
-    {
-        QByteArray line = file.readLine();
-        if (!line.isEmpty())
-            m_challenges << QString(line);
-    }
-
-    if (m_challenges.isEmpty())
-    {
-        m_challenges << msg;
-        ui->challengeLabel->setText(msg);
-    }
+    return status;
 }
 
-void EpicChallenge::setDataBase()
+unsigned char EpicChallenge::setDataBase()
 {
+    unsigned char status=OK;
     const QString DRIVER("QSQLITE");
     if(QSqlDatabase::isDriverAvailable(DRIVER))
         m_db = QSqlDatabase::addDatabase(DRIVER);
+    else
+        status=NOK;
 
     //creation de la database
     QString dbName("loops_");
@@ -118,8 +215,51 @@ void EpicChallenge::setDataBase()
     m_db.setDatabaseName(dbName);
 
     if(!m_db.open())
+    {
         qDebug() << "ERROR: " << m_db.lastError();
-    QSqlQuery query("CREATE TABLE loops (id INTEGER PRIMARY KEY, tag INTEGER, chrono TEXT)");
-    if(!query.isActive())
-        qDebug() << "ERROR: " << query.lastError().text();
+        status=NOK;
+    }
+    else{
+        //create a storage table for loop time
+        QSqlQuery query("CREATE TABLE loops (id INTEGER PRIMARY KEY, tag INTEGER, chrono TEXT)");
+
+        if(!query.isActive())
+        {
+            qDebug() << "ERROR: " << query.lastError().text();
+            status=NOK;
+        }
+
+        //create a storage table for predefined id tag or associated name
+        QSqlQuery query2("CREATE TABLE tagID (id INTEGER PRIMARY KEY, id1 INT8, id2 INT8, id3 INT8, tag INTEGER, name TEXT)");
+
+        if(!query2.isActive())
+        {
+            qDebug() << "ERROR: " << query2.lastError().text();
+            status=NOK;
+        }
+
+        //filling the tageID table
+        //it doesn't care editing the status while the app can run without that
+        QFile file("runnerListing.csv");
+        if (!file.open(QIODevice::ReadOnly)) {
+            qDebug() << file.errorString();
+        }
+        else
+        {
+            while (!file.atEnd())
+            {
+                QString line = file.readLine();
+                QStringList list1 = line.split(QLatin1Char(';'));
+                if(list1.size()>=2)
+                {
+                    QString str_num=list1.at(0);
+                    QString str_name=list1.at(1);
+                    qDebug() << str_num << " : "<<str_name;
+                }
+            }
+            file.close();
+        }
+    }
+
+    return status;
 }

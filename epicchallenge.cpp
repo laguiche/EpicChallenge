@@ -42,10 +42,33 @@ void EpicChallenge::init()
     m_cadenceur=new QTimer();
     t_0=QTime::currentTime();
 
-    QPalette sample_palette;
+    /*QPalette sample_palette;
     sample_palette.setColor(QPalette::Window, QColor(121,248,248,255));
     ui->challengeLabel->setAutoFillBackground(true);
-    ui->challengeLabel->setPalette(sample_palette);
+    ui->challengeLabel->setPalette(sample_palette);*/
+
+
+    // [1] The picture is not repeated, can be zoomed freely
+    ui->challengeLabel->setStyleSheet("QLabel{"
+                             "border-image:url(:/img/pictures/background.jpg) 4 4 4 4 stretch stretch;"
+                            "color:blue;"
+                             "}");
+/*
+         // [2] The picture is not repeated, the size is fixed
+    ui->label_2->setStyleSheet("QLabel{"
+                               "background-image:url(:/images/bd.png);"
+                               "background-position:top right;"
+                               "background-origin:content;"
+                               "background-repeat:none;"
+                               "}");*/
+/*
+         // [3] The picture is not repeated, the zoom ratio can be set, and the dynamic zoom is not allowed
+    QImage* img = new QImage;
+    img->load(QString(":/img/pictures/background.jpg"));
+    QImage scaledimg;
+    scaledimg = img->scaled(ui->challengeLabel->width(),ui->challengeLabel->height(),Qt::KeepAspectRatio);
+    ui->challengeLabel->setPixmap(QPixmap::fromImage(scaledimg));
+*/
 
     QString error_msg;
     if (statusFile_1*statusFile_2*statusFile_3==NOK)
@@ -263,6 +286,7 @@ unsigned char EpicChallenge::setDataBase()
         }
         else
         {
+            qDebug() << "Lecture du fichier des noms de coureurs";
             while (!file.atEnd())
             {
                 QString line = file.readLine();

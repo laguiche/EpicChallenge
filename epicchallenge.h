@@ -46,7 +46,7 @@ private:
     QStringList m_lowChallenges;
     QSqlDatabase m_db;
     bool m_sportMode;
-    QTime t_0;
+    int t_0;
     QTimer * m_cadenceur;
 
     void init();

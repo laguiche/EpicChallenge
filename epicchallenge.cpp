@@ -40,7 +40,7 @@ void EpicChallenge::init()
 #endif
 
     m_cadenceur=new QTimer();
-    t_0=QTime::currentTime();
+    t_0=QDateTime::currentMSecsSinceEpoch();
 
     /*QPalette sample_palette;
     sample_palette.setColor(QPalette::Window, QColor(121,248,248,255));
@@ -48,21 +48,22 @@ void EpicChallenge::init()
     ui->challengeLabel->setPalette(sample_palette);*/
 
 
-    // [1] The picture is not repeated, can be zoomed freely
+    //Set the "Epic & trail" logo in background
     ui->challengeLabel->setStyleSheet("QLabel{"
                              "border-image:url(:/img/pictures/background.jpg) 4 4 4 4 stretch stretch;"
                             "color:blue;"
                              "}");
 /*
-         // [2] The picture is not repeated, the size is fixed
-    ui->label_2->setStyleSheet("QLabel{"
-                               "background-image:url(:/images/bd.png);"
-                               "background-position:top right;"
-                               "background-origin:content;"
-                               "background-repeat:none;"
-                               "}");*/
+    //another way to do this
+    ui->challengeLabel->setStyleSheet("QLabel{"
+                       "background-image:url(:/img/pictures/background.jpg);"
+                       "background-position:top right;"
+                       "background-origin:content;"
+                       "background-repeat:none;"
+                       "}");
+*/
 /*
-         // [3] The picture is not repeated, the zoom ratio can be set, and the dynamic zoom is not allowed
+    //here to, another way to do this
     QImage* img = new QImage;
     img->load(QString(":/img/pictures/background.jpg"));
     QImage scaledimg;
@@ -93,53 +94,131 @@ void EpicChallenge::init()
 
 void EpicChallenge::getChallenge(int id, bool mode)
 {
-    QTime t_new=QTime::currentTime();
+    int t_new=QDateTime::currentMSecsSinceEpoch();
     QString tag;
     tag.setNum(id);
 
     //comparaison avec le dernier tour enregistré
-    QTime t_last=t_0;
+    int t_last=t_0;
     int timeElapsed=0;
     QSqlQuery query;
-    query.prepare("SELECT chrono,tag FROM loops WHERE tag=?");
+    query.prepare("SELECT chrono,tag FROM LOOPS WHERE tag=?");
     query.addBindValue(id);
 
     if(!query.exec())
       qDebug() << "ERROR: " << query.lastError().text();
 
+    //tour le plus récent
     while(query.next())
     {
-        QTime t_query=QTime::fromString(query.value(0).toString(),"hh_mm_ss");
-        qDebug() << "t_query: "<<t_query;
+        int t_query=query.value(0).toInt();
+        //qDebug() << "t_query: "<< t_query;
         if(t_query>t_last)
             t_last=t_query;
     }
 
-    timeElapsed=t_last.msecsTo(t_new);
-    qDebug() << t_last << t_new << timeElapsed;
+    //calcul du temps du tour actuel
+    timeElapsed=t_new-t_last;
+    //qDebug() << t_last << t_new << timeElapsed;
 
-    if(mode && ((timeElapsed/1000)>=10.))
+    //en mode "sport" le tour devrait faire plus de 10 secondes :-)
+    if(mode && ((timeElapsed/1000)>=1.))
     {
         //enregistrement du chrono
         QSqlQuery query1;
-        QString query1_str="INSERT INTO loops(tag,chrono) VALUES(%1,'%2')";
+        QString query1_str="INSERT INTO LOOPS(tag,chrono,elapsed) VALUES(%1,%2,%3)";
 
-        if(!query1.exec(query1_str.arg(id).arg(t_new.toString("hh_mm_ss"))))
+        if(!query1.exec(query1_str.arg(id).arg(t_new).arg(timeElapsed)))
           qDebug() << "ERROR: " << query1.lastError().text();
 
-        int idxChallenge=std::rand() % m_highChallenges.size();
+        //classement des participants
+        QSqlQuery query2;
+        //QString query2_str="SELECT MIN(elapsed),tag FROM LOOPS GROUP BY tag ORDER BY elapsed";
+        QString query2_str="SELECT b.tag,name,MIN(elapsed) FROM PARTICIPANTS AS a INNER JOIN LOOPS AS b ON a.tag=b.tag GROUP BY b.tag ORDER BY elapsed";
+        if(!query2.exec(query2_str))
+          qDebug() << "ERROR: " << query2.lastError().text();
+
+        QSqlQuery query3;
+        QString query3_str="SELECT tag, COUNT(tag) FROM LOOPS GROUP BY tag ORDER BY COUNT(tag) DESC";
+        if(!query3.exec(query3_str))
+          qDebug() << "ERROR: " << query3.lastError().text();
+
+        //Affichage des classements
+        QString str_laps_order="<table><tr><th>Dossard</th><th>nom</th><th>Meilleur tour en secondes</th></tr>";
+        QStringList list_classement;
+        int count=0;
+        while(query2.next())
+        {
+            QString str_time;
+            str_time.setNum(query2.value(2).toFloat()/1000);
+            str_laps_order=str_laps_order+"<tr><th>"+query2.value(0).toString()+"</th><th>"+query2.value(1).toString()+"</th><th>"+str_time+"</th></tr>";
+            list_classement << query2.value(1).toString();
+            count++;
+                //qDebug() << "tag: "<<query2.value(1).toInt()<<" temps:" <<query2.value(0).toFloat()/1000;
+
+        }
+        str_laps_order=str_laps_order+"</table>";
+        str_laps_order=str_laps_order+"<br><table><tr><th>Dossard<th><th>Nombre de tours</th></tr>";
+        while(query3.next())
+        {
+            str_laps_order=str_laps_order+"<tr><th>"+query3.value(0).toString()+"</th><th>"+query3.value(1).toString()+"</th></tr>";
+        }
+        str_laps_order=str_laps_order+"</table>";
+        ui->classementLabel->clear();
+        ui->classementLabel->setText(str_laps_order);
+        //qDebug() << "-------------------------------";
+
+
+        //décision du type challenge
         QString msg;
-        msg.setNum(id);
-        msg=msg+" : "+m_highChallenges.at(idxChallenge);
+        if(count<10)
+        {
+            int idxChallenge=std::rand() % m_highChallenges.size();
+            msg.setNum(id);
+            msg=msg+" : "+m_highChallenges.at(idxChallenge);
+            /*int idxChallenge=std::rand() % m_mediumChallenges.size();
+            msg.setNum(id);
+            msg=msg+" : "+m_mediumChallenges.at(idxChallenge);*/
+        }
+        else
+        {
+            int i_part=count/3;
+            int which_level=2*i_part;
+            msg.setNum(id);
+            for(int j=0;j<list_classement.size();j++)
+            {
+                if(list_classement.at(j)==msg)
+                    which_level=j;
+            }
+            if(which_level<=i_part)
+            {
+                int idxChallenge=std::rand() % m_highChallenges.size();
+                msg=msg+" : "+m_highChallenges.at(idxChallenge);
+            }
+            else if ((which_level>i_part)&&(which_level<=(2*i_part)))
+            {
+                int idxChallenge=std::rand() % m_mediumChallenges.size();
+                msg=msg+" : "+m_mediumChallenges.at(idxChallenge);
+            }
+            else if (which_level>(2*i_part))
+            {
+                int idxChallenge=std::rand() % m_lowChallenges.size();
+                msg=msg+" : "+m_lowChallenges.at(idxChallenge);
+            }
+
+        }
+
+        //affichage du challenge
         ui->challengeLabel->setText(msg);
     }
+    //en mode "soirée" on laisse 2 secondes minimum entre 2 demandes de défis  :-)
     if(!mode && ((timeElapsed/1000)>=2.))
     {
         //enregistrement du chrono
         QSqlQuery query1;
-        QString query1_str="INSERT INTO loops(tag,chrono) VALUES(%1,'%2')";
+        QString query1_str="INSERT INTO LOOPS(tag,chrono) VALUES(%1,'%2')";
 
-        if(!query1.exec(query1_str.arg(id).arg(t_new.toString("hh_mm_ss"))))
+        if(!query1.exec(query1_str.arg(id).arg(t_new)))
           qDebug() << "ERROR: " << query1.lastError().text();
 
         int idxChallenge=std::rand() % m_highChallenges.size();
@@ -160,7 +239,7 @@ void EpicChallenge::on_challengeButton()
     {
         QString m_string_uid= ui->TagEdit->text();
         debug_tag=m_string_uid.toInt();
-        qDebug() << "[DEBUG] nouveau tag" << debug_tag;
+        //qDebug() << "[DEBUG] nouveau tag" << debug_tag;
         ui->TagEdit->clear();
     }
 
@@ -187,7 +266,7 @@ void EpicChallenge::on_challengeButton()
         getChallenge(debug_tag,m_sportMode);
     else {
         QSqlQuery query1;
-        QString query1_str="SELECT tag FROM tagID WHERE (id1=%1 AND id2=%2 AND id3=%3)";
+        QString query1_str="SELECT tag FROM PARTICIPANTS WHERE (id1=%1 AND id2=%2 AND id3=%3)";
 
         if(!query1.exec(query1_str.arg(UID[0]).arg(UID[1]).arg(UID[2])))
           qDebug() << "ERROR: " << query1.lastError().text();
@@ -260,21 +339,21 @@ unsigned char EpicChallenge::setDataBase()
         status=NOK;
     }
     else{
-        //create a storage table for loop time
-        QSqlQuery query("CREATE TABLE loops (id INTEGER PRIMARY KEY, tag INTEGER, chrono TEXT)");
-
-        if(!query.isActive())
-        {
-            qDebug() << "ERROR: " << query.lastError().text();
-            status=NOK;
-        }
-
         //create a storage table for predefined id tag or associated name
-        QSqlQuery query2("CREATE TABLE tagID (id INTEGER PRIMARY KEY, id1 INT8, id2 INT8, id3 INT8, tag INTEGER, name TEXT)");
+        QSqlQuery query2("CREATE TABLE PARTICIPANTS (tag INTEGER PRIMARY KEY,id1 INT8, id2 INT8, id3 INT8, name TEXT)");
 
         if(!query2.isActive())
         {
             qDebug() << "ERROR: " << query2.lastError().text();
+            status=NOK;
+        }
+
+        //create a storage table for loop time
+        QSqlQuery query("CREATE TABLE LOOPS (id INTEGER PRIMARY KEY, tag INTEGER, chrono INTEGER, elapsed INTEGER, FOREIGN KEY(tag) REFERENCES PARTICIPANTS(tag))");
+
+        if(!query.isActive())
+        {
+            qDebug() << "ERROR: " << query.lastError().text();
             status=NOK;
         }
 
@@ -294,22 +373,22 @@ unsigned char EpicChallenge::setDataBase()
                 if(list1.size()>=4)
                 {
                     bool ok;
-                    QString str_uid1=list1.at(0);
+                    QString str_num=list1.at(0);
+                    int num=str_num.toInt();
+                    QString str_uid1=list1.at(1);
                     int uid1=str_uid1.toInt(&ok,16);
-                    QString str_uid2=list1.at(1);
+                    QString str_uid2=list1.at(2);
                     int uid2=str_uid2.toInt(&ok,16);
-                    QString str_uid3=list1.at(2);
+                    QString str_uid3=list1.at(3);
                     int uid3=str_uid3.toInt(&ok,16);
                     QString str_name=list1.at(4);
-                    QString str_num=list1.at(3);
-                    int num=str_num.toInt();
 
                     qDebug() << str_num << " : " <<str_name;
                     //enregistrement du chrono
                     QSqlQuery query1;
-                    QString query1_str="INSERT INTO tagID(id1,id2,id3,tag,name) VALUES(%1,%2,%3,%4,'%5')";
+                    QString query1_str="INSERT INTO PARTICIPANTS(tag,id1,id2,id3,name) VALUES(%1,%2,%3,%4,'%5')";
 
-                    if(!query1.exec(query1_str.arg(uid1).arg(uid2).arg(uid3).arg(num).arg(str_name)))
+                    if(!query1.exec(query1_str.arg(num).arg(uid1).arg(uid2).arg(uid3).arg(str_name)))
                       qDebug() << "ERROR: " << query1.lastError().text();
                 }
             }

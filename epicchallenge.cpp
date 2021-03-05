@@ -19,6 +19,7 @@ void EpicChallenge::init()
 {
     //if we are not in sport mode we turn on party mode which doesn't care high, medium or low challenge;
     //furthermore we have stats and other stuff in sport mode
+    //essai PAT
     m_sportMode=true;
 
     //init database to save time of running loops in sport mode
